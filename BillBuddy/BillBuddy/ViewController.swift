@@ -7,6 +7,7 @@ class ViewController: UIViewController, WKNavigationDelegate, WKUIDelegate {
     var webView: WKWebView!
     var lockScreen: UIView!
     var isAuthenticated = false
+    var isAuthenticating = false  // Prevent re-triggering during Face ID prompt
     let appURL = "https://billbuddy.us"
 
     // MARK: - View Lifecycle
@@ -18,6 +19,11 @@ class ViewController: UIViewController, WKNavigationDelegate, WKUIDelegate {
         setupLockScreen()
         authenticateUser()
 
+        // Use willResignActive to detect when user leaves the app (not didBecomeActive which fires during Face ID)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(appWillResignActive),
+            name: UIApplication.willResignActiveNotification, object: nil
+        )
         NotificationCenter.default.addObserver(
             self, selector: #selector(appDidBecomeActive),
             name: UIApplication.didBecomeActiveNotification, object: nil
@@ -102,6 +108,10 @@ class ViewController: UIViewController, WKNavigationDelegate, WKUIDelegate {
     // MARK: - Face ID / Touch ID Authentication
 
     @objc func authenticateUser() {
+        // Prevent multiple simultaneous auth attempts
+        guard !isAuthenticating else { return }
+        isAuthenticating = true
+
         let context = LAContext()
         var error: NSError?
 
@@ -111,6 +121,7 @@ class ViewController: UIViewController, WKNavigationDelegate, WKUIDelegate {
                 localizedReason: "Unlock BillBuddy to access your finances"
             ) { success, error in
                 DispatchQueue.main.async {
+                    self.isAuthenticating = false
                     if success {
                         self.unlockApp()
                     }
@@ -123,6 +134,7 @@ class ViewController: UIViewController, WKNavigationDelegate, WKUIDelegate {
                 localizedReason: "Unlock BillBuddy to access your finances"
             ) { success, error in
                 DispatchQueue.main.async {
+                    self.isAuthenticating = false
                     if success {
                         self.unlockApp()
                     }
@@ -142,13 +154,20 @@ class ViewController: UIViewController, WKNavigationDelegate, WKUIDelegate {
 
     // MARK: - Re-lock on App Resume
 
+    @objc func appWillResignActive() {
+        // Only lock if user was previously authenticated (not during initial Face ID prompt)
+        if isAuthenticated && !isAuthenticating {
+            lockScreen.isHidden = false
+            lockScreen.alpha = 1
+            isAuthenticated = false
+        }
+    }
+
     @objc func appDidBecomeActive() {
-        // Re-authenticate when app comes back from background
-        if !isAuthenticated { return }
-        lockScreen.isHidden = false
-        lockScreen.alpha = 1
-        isAuthenticated = false
-        authenticateUser()
+        // Only re-authenticate if the app was locked by willResignActive (not during Face ID itself)
+        if !isAuthenticated && !isAuthenticating {
+            authenticateUser()
+        }
     }
 
     // MARK: - WKWebView Navigation
@@ -175,4 +194,3 @@ class ViewController: UIViewController, WKNavigationDelegate, WKUIDelegate {
         return nil
     }
 }
-
